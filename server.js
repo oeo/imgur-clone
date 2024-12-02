@@ -56,21 +56,21 @@ if (CLOAK_ENABLED) {
 
   const botProtection = (req, res, next) => {
     const userAgent = (req.headers['user-agent'] || '').toLowerCase()
-    
+
     // Always add noindex headers when cloaking is enabled
     res.setHeader('X-Robots-Tag', 'noindex, nofollow')
-    
+
     // Skip check for homepage and robots.txt
     if (req.path === '/' || req.path === '/robots.txt') {
       return next()
     }
-    
+
     // Block if user agent looks like a bot
     const isAllowed = allowedUserAgents.some(agent => userAgent.includes(agent))
     if (!isAllowed) {
       return res.status(403).send('forbidden')
     }
-    
+
     next()
   }
 
@@ -146,7 +146,7 @@ const generateShortCode = async () => {
   let length = MIN_LENGTH
   let attempts = MAX_ATTEMPTS
   let startIndex = 0
-  
+
   // Try to get the last successful code
   const lastCode = await getLastCode()
   if (lastCode) {
@@ -158,20 +158,20 @@ const generateShortCode = async () => {
     }
     startIndex++ // Start from the next possible code
   }
-  
+
   while (attempts > 0) {
     // Generate all possible codes of current length
     const maxIndex = Math.pow(CHARS.length, length)
     for (let i = startIndex; i < maxIndex; i++) {
       let code = ''
       let num = i
-      
+
       // Convert number to base-36 representation using our charset
       for (let j = 0; j < length; j++) {
         code = CHARS[num % CHARS.length] + code
         num = Math.floor(num / CHARS.length)
       }
-      
+
       // Check if code is available in both memcached and db
       try {
         // Check memcached first (faster)
@@ -180,11 +180,11 @@ const generateShortCode = async () => {
             resolve(!!data)
           })
         })
-        
+
         if (!exists) {
           // Check database
           const dbExists = await db.collection('files').findOne({ short_code: code })
-          
+
           if (!dbExists) {
             // Reserve the code in memcached
             await new Promise((resolve, reject) => {
@@ -193,10 +193,10 @@ const generateShortCode = async () => {
                 else resolve()
               })
             })
-            
+
             // Store this as the last successful code
             await setLastCode(code)
-            
+
             return code
           }
         }
@@ -207,16 +207,16 @@ const generateShortCode = async () => {
         await setLastCode(fallback)
         return fallback
       }
-      
+
       attempts--
       if (attempts <= 0) break
     }
-    
+
     // If we get here, all codes of current length are taken
     length++
     startIndex = 0 // Reset start index for new length
   }
-  
+
   // Fallback to random hex if we couldn't find a short code
   const fallback = crypto.randomBytes(MIN_LENGTH).toString('hex').slice(0, MIN_LENGTH).toLowerCase()
   await setLastCode(fallback)
@@ -228,7 +228,7 @@ const getFromCache = (key) => {
     memcached.get(key, (err, data) => {
       if (err) return reject(err)
       if (!data) return resolve(null)
-      
+
       try {
         data.data = Buffer.from(data.data_base64, 'base64')
         delete data.data_base64
@@ -243,14 +243,14 @@ const getFromCache = (key) => {
 const setCache = (key, value) => {
   return new Promise((resolve, reject) => {
     if (!value || !value.data) return resolve()
-    
+
     const cacheValue = {
       short_code: value.short_code,
       content_type: value.content_type,
       data_base64: value.data.toString('base64'),
       created_at: value.created_at
     }
-    
+
     memcached.set(key, cacheValue, EXPIRY_SECONDS, (err) => {
       if (err) {
         console.warn('Cache set failed:', err.message)
@@ -265,9 +265,9 @@ const setCache = (key, value) => {
 const connectDb = async () => {
   const client = await MongoClient.connect(process.env.MONGO_URI)
   db = client.db()
-  
+
   await db.collection('files').createIndex({ short_code: 1 }, { unique: true })
-  await db.collection('files').createIndex({ created_at: 1 }, { 
+  await db.collection('files').createIndex({ created_at: 1 }, {
     expireAfterSeconds: EXPIRY_SECONDS
   })
 }
@@ -276,16 +276,16 @@ app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'no file provided' })
     if (req.file.size > MAX_FILE_SIZE) return res.status(413).json({ error: 'file too large' })
-    
+
     const shortCode = await generateShortCode()
-    
+
     const fileData = {
       short_code: shortCode,
       content_type: req.file.mimetype,
       data: req.file.buffer,
       created_at: new Date()
     }
-    
+
     try {
       await db.collection('files').insertOne(fileData)
       // Track upload
@@ -308,10 +308,10 @@ app.post('/upload', upload.single('file'), async (req, res) => {
       console.warn('Cache set failed:', err)
       // Continue without caching
     }
-    
-    res.json({ 
+
+    res.json({
       url: `${req.protocol}://${req.get('host')}/${shortCode}`,
-      short_code: shortCode 
+      short_code: shortCode
     })
   } catch (err) {
     console.error('Upload error:', err)
@@ -335,10 +335,10 @@ app.get('/favicon.ico', (req, res) => {
 
 app.get('/:shortCode', async (req, res) => {
   const shortCode = req.params.shortCode.toLowerCase()
-  
+
   try {
     let file = null
-    
+
     try {
       // try cache first
       const cachedFile = await getFromCache(shortCode)
@@ -350,22 +350,22 @@ app.get('/:shortCode', async (req, res) => {
       console.warn('Cache get failed:', err)
       // Continue without cache
     }
-    
+
     if (!file) {
       // fallback to db
-      file = await db.collection('files').findOne({ 
-        short_code: shortCode 
+      file = await db.collection('files').findOne({
+        short_code: shortCode
       })
-      
+
       if (!file) return res.status(404).send('not found')
-      
+
       try {
         await setCache(shortCode, file)
       } catch (err) {
         console.warn('Cache set failed:', err)
         // Continue without caching
       }
-      
+
       res.setHeader('X-Cache', 'MISS')
     }
 
@@ -377,9 +377,9 @@ app.get('/:shortCode', async (req, res) => {
       type: file.content_type,
       ua: req.headers['user-agent']
     })
-    
+
     res.setHeader('Content-Type', file.content_type)
-    
+
     // Handle both Buffer and Binary data types
     if (file.data instanceof Buffer) {
       res.send(file.data)
@@ -413,7 +413,7 @@ app.get('/admin/stats', async (req, res) => {
 
     // Query stats for requested days
     const results = await metrics.queryDays(days * -1)
-    
+
     // Get unique visitors
     let unique = results.find({
       type: 'bmp',
@@ -439,7 +439,7 @@ app.get('/admin/stats', async (req, res) => {
       key: 'shortcode',
       merge: merged
     })
-    
+
     // Get top file types
     const topTypes = results.find({
       type: 'top',
@@ -477,7 +477,7 @@ app.get('/admin/stats', async (req, res) => {
 const port = process.env.PORT || 3000
 
 connectDb().then(() => {
-  app.listen(port, () => {
+  app.listen(port, '0.0.0.0', () => {
     console.log(`server running on port ${port}`)
     console.log(`robot cloaking: ${CLOAK_ENABLED ? 'enabled' : 'disabled'}`)
   })
