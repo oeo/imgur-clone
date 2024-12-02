@@ -1,5 +1,6 @@
 {
   "name": "imgur-clone",
+  "description": "minimal file sharing service with short urls",
   "version": "1.0.0",
   "main": "server.js",
   "dependencies": {
