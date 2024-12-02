@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title></title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="alternate icon" href="/favicon.ico">
+  <style>
+    :root { --font: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace; --text: #2c3e50; --muted: #94a3b8; --border: #e2e8f0; --accent: #ffb258; --success: #486b55; --bg: #fff; --hover: #f8fafc; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font: 12px/1.6 var(--font); min-height: 100vh; display: grid; place-items: center; }
+    .progress { position: fixed; inset: 0 0 auto 0; height: 1px; background: var(--border); display: none; z-index: 10; }
+    .progress-bar { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+    .container { width: min(400px, 100% - 2rem); margin: 1rem; }
+    .drop { aspect-ratio: 1; color: var(--muted); padding: 2rem; text-align: center; cursor: pointer; transition: .2s ease; border: 1px dashed var(--border); display: grid; place-items: center; position: relative; }
+    .drop:hover, .drop.over { border-color: var(--accent); color: var(--accent); background: var(--hover); }
+    .drop::before { content: ''; position: absolute; inset: -1px; border: 1px solid var(--border); pointer-events: none; }
+    input[type="file"] { display: none; }
+    .status { margin-top: .5rem; font-size: .9em; color: var(--muted); }
+    .success .status { color: var(--success); }
+  </style>
+</head>
+<body>
+  <div class="progress" id="progress">
+    <div class="progress-bar" id="progress-bar"></div>
+  </div>
+  <div class="container">
+    <div class="drop" id="drop">
+      drag and drop file
+      <span class="status">or click to browse / paste from clipboard</span>
+      <input type="file" id="file">
+    </div>
+  </div>
+  <script>
+    const drop = document.getElementById('drop')
+    const file = document.getElementById('file')
+    
+    drop.onclick = () => file.click()
+    
+    drop.ondragover = e => {
+      e.preventDefault()
+      drop.classList.add('over')
+    }
+    
+    drop.ondragleave = () => drop.classList.remove('over')
+    
+    drop.ondrop = e => {
+      e.preventDefault()
+      drop.classList.remove('over')
+      handleFile(e.dataTransfer.files[0])
+    }
+    
+    file.onchange = e => handleFile(e.target.files[0])
+
+    document.onpaste = e => {
+      e.preventDefault()
+      
+      const items = e.clipboardData.items
+      
+      for (let item of items) {
+        if (item.type.startsWith('image/') || item.kind === 'file') {
+          return handleFile(item.getAsFile())
+        }
+      }
+
+      const text = e.clipboardData.getData('text/plain')
+      if (text?.trim()) {
+        handleFile(new File([text], 'paste.txt', { type: 'text/plain' }))
+      }
+    }
+    
+    async function handleFile(file) {
+      if (!file) return
+      
+      const form = new FormData()
+      form.append('file', file)
+      
+      const progress = document.getElementById('progress')
+      const bar = document.getElementById('progress-bar')
+      progress.style.display = 'block'
+      bar.style.width = '0'
+      drop.querySelector('.status').textContent = 'uploading...'
+
+      try {
+        const xhr = new XMLHttpRequest()
+        
+        xhr.upload.onprogress = e => {
+          if (e.lengthComputable) {
+            bar.style.width = (e.loaded / e.total * 100) + '%'
+          }
+        }
+        
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            const data = JSON.parse(xhr.responseText)
+            drop.classList.add('success')
+            drop.querySelector('.status').textContent = 'upload complete'
+            setTimeout(() => location.href = data.url, 500)
+          } else {
+            throw new Error('Upload failed')
+          }
+        }
+        
+        xhr.onerror = () => {
+          throw new Error('Upload failed')
+        }
+        
+        xhr.open('POST', '/upload')
+        xhr.send(form)
+      } catch (err) {
+        drop.querySelector('.status').textContent = 'upload failed'
+        console.error(err)
+      } finally {
+        setTimeout(() => {
+          progress.style.display = 'none'
+          bar.style.width = '0'
+          drop.classList.remove('success')
+        }, 1000)
+      }
+    }
+  </script>
+</body>
+</html> 
